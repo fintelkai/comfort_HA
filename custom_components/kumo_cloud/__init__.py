@@ -21,8 +21,8 @@ PLATFORMS: list[Platform] = [Platform.CLIMATE, Platform.SENSOR]
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Kumo Cloud from a config entry."""
 
-    # Create API client
-    api = KumoCloudAPI(hass)
+    # Create API client (Optimization 6: Pass config entry for token persistence)
+    api = KumoCloudAPI(hass, entry)
 
     # Initialize with stored tokens if available
     if "access_token" in entry.data:

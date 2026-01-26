@@ -22,8 +22,60 @@ from .const import (
     TOKEN_REFRESH_INTERVAL,
     TOKEN_EXPIRY_MARGIN,
 )
+# Optimization 7: Import type definitions for better type safety
+from .types import (
+    LoginResponse,
+    Site,
+    Zone,
+    DeviceDetail,
+    DeviceProfile,
+)
 
 _LOGGER = logging.getLogger(__name__)
+
+
+# Optimization 8: Rate limiting as async context manager
+class RateLimiter:
+    """Async context manager for rate limiting API requests."""
+
+    def __init__(self, min_interval: timedelta, lock: asyncio.Lock) -> None:
+        """Initialize rate limiter.
+
+        Args:
+            min_interval: Minimum time between requests
+            lock: Shared lock for synchronization
+        """
+        self.min_interval = min_interval
+        self.lock = lock
+        self.last_request_time: datetime | None = None
+
+    async def __aenter__(self) -> RateLimiter:
+        """Enter the context manager and enforce rate limiting."""
+        await self.lock.acquire()
+
+        if self.last_request_time is not None:
+            time_since_last = datetime.now() - self.last_request_time
+            if time_since_last < self.min_interval:
+                wait_time = (self.min_interval - time_since_last).total_seconds()
+                if wait_time > 0:
+                    _LOGGER.debug(
+                        "Rate limiting: waiting %.1f seconds before next request",
+                        wait_time,
+                    )
+                    try:
+                        await asyncio.sleep(wait_time)
+                    except asyncio.CancelledError:
+                        self.lock.release()
+                        raise
+
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+        """Exit the context manager and update timestamp."""
+        if exc_type is None:
+            # Only update timestamp on successful request
+            self.last_request_time = datetime.now()
+        self.lock.release()
 
 
 class KumoCloudError(HomeAssistantError):
@@ -41,8 +93,13 @@ class KumoCloudConnectionError(KumoCloudError):
 class KumoCloudAPI:
     """Kumo Cloud API client."""
 
-    def __init__(self, hass: HomeAssistant) -> None:
-        """Initialize the API client."""
+    def __init__(self, hass: HomeAssistant, config_entry=None) -> None:
+        """Initialize the API client.
+
+        Args:
+            hass: Home Assistant instance
+            config_entry: Optional config entry for token persistence (Optimization 6)
+        """
         self.hass = hass
         self.session = async_get_clientsession(hass)
         self.base_url = API_BASE_URL
@@ -50,14 +107,15 @@ class KumoCloudAPI:
         self.access_token: str | None = None
         self.refresh_token: str | None = None
         self.token_expires_at: datetime | None = None
-        # Rate limiting: ensure at least 2 seconds between requests
-        # Only applies if a request was made recently to prevent 429 errors
-        # The 60-second scan interval ensures we don't exceed API limits during normal operation
-        self._last_request_time: datetime | None = None
+        self._config_entry = config_entry  # Optimization 6: Store for token updates
+        # Optimization 8: Use rate limiter context manager
         self._request_lock = asyncio.Lock()
-        self._min_request_interval = timedelta(seconds=2)
+        self._rate_limiter = RateLimiter(
+            min_interval=timedelta(seconds=2),
+            lock=self._request_lock,
+        )
 
-    async def login(self, username: str, password: str) -> dict[str, Any]:
+    async def login(self, username: str, password: str) -> LoginResponse:
         """Login to Kumo Cloud and return user data."""
         url = f"{self.base_url}/{API_VERSION}/login"
         headers = {
@@ -126,6 +184,18 @@ class KumoCloudAPI:
                         seconds=TOKEN_REFRESH_INTERVAL
                     )
 
+                    # Optimization 6: Persist refreshed tokens to config entry
+                    if self._config_entry:
+                        self.hass.config_entries.async_update_entry(
+                            self._config_entry,
+                            data={
+                                **self._config_entry.data,
+                                "access_token": self.access_token,
+                                "refresh_token": self.refresh_token,
+                            },
+                        )
+                        _LOGGER.debug("Persisted refreshed tokens to config entry")
+
         except asyncio.TimeoutError as err:
             raise KumoCloudConnectionError("Connection timeout during refresh") from err
         except ClientResponseError as err:
@@ -151,29 +221,8 @@ class KumoCloudAPI:
         self, method: str, endpoint: str, data: dict[str, Any] | None = None
     ) -> dict[str, Any]:
         """Make an authenticated request to the API with rate limiting."""
-        # Use lock to ensure only one request at a time
-        async with self._request_lock:
-            # Rate limiting: only wait if a request was made very recently
-            # This prevents 429 errors while allowing rapid requests during initial setup
-            if self._last_request_time is not None:
-                time_since_last = datetime.now() - self._last_request_time
-                if time_since_last < self._min_request_interval:
-                    wait_time = (
-                        self._min_request_interval - time_since_last
-                    ).total_seconds()
-                    # Only wait if it's a very short wait (less than 5 seconds)
-                    # This prevents excessive delays during setup
-                    if wait_time > 0:
-                        _LOGGER.debug(
-                            "Rate limiting: waiting %.1f seconds before next request",
-                            wait_time,
-                        )
-                        try:
-                            await asyncio.sleep(wait_time)
-                        except asyncio.CancelledError:
-                            # Re-raise cancellation to allow proper cleanup
-                            raise
-
+        # Optimization 8: Use rate limiter context manager
+        async with self._rate_limiter:
             await self._ensure_token_valid()
 
             url = f"{self.base_url}/{API_VERSION}{endpoint}"
@@ -200,7 +249,6 @@ class KumoCloudAPI:
                                 else:
                                     response.raise_for_status()
                                     result = await response.json()
-                                    self._last_request_time = datetime.now()
                                     return result
                         elif method.upper() == "POST":
                             async with self.session.post(
@@ -216,7 +264,6 @@ class KumoCloudAPI:
                                         if response.content_type == "application/json"
                                         else {}
                                     )
-                                    self._last_request_time = datetime.now()
                                     return result
 
                     # Handle 429 outside timeout context to avoid timeout during sleep
@@ -273,19 +320,19 @@ class KumoCloudAPI:
         """Get account information."""
         return await self._request("GET", "/accounts/me")
 
-    async def get_sites(self) -> list[dict[str, Any]]:
+    async def get_sites(self) -> list[Site]:
         """Get list of sites."""
         return await self._request("GET", "/sites/")
 
-    async def get_zones(self, site_id: str) -> list[dict[str, Any]]:
+    async def get_zones(self, site_id: str) -> list[Zone]:
         """Get list of zones for a site."""
         return await self._request("GET", f"/sites/{site_id}/zones")
 
-    async def get_device_details(self, device_serial: str) -> dict[str, Any]:
+    async def get_device_details(self, device_serial: str) -> DeviceDetail:
         """Get device details."""
         return await self._request("GET", f"/devices/{device_serial}")
 
-    async def get_device_profile(self, device_serial: str) -> list[dict[str, Any]]:
+    async def get_device_profile(self, device_serial: str) -> list[DeviceProfile]:
         """Get device profile information."""
         return await self._request("GET", f"/devices/{device_serial}/profile")
 

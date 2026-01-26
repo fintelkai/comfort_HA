@@ -29,7 +29,9 @@ class KumoCloudDataUpdateCoordinator(DataUpdateCoordinator):
         self.device_profiles: dict[str, list[dict[str, Any]]] = {}
 
         # Instance variable to store cached commands
+        # Optimization 3: Add max age to prevent memory leaks
         self.cached_commands: dict[tuple[str, str], tuple[str, Any]] = {}
+        self._cache_max_age = timedelta(minutes=5)  # Clear commands older than 5 minutes
 
     def _process_pending_commands(self, device_serial: str, device_detail: dict[str, Any]) -> None:
         """Process cached commands and cull outdated commands for a device."""
@@ -52,17 +54,27 @@ class KumoCloudDataUpdateCoordinator(DataUpdateCoordinator):
             devices = {}
             device_profiles = {}
 
+            # Optimization 1: Fetch all zone data in parallel
+            tasks = []
+            device_serials = []
+
             for zone in zones:
                 if "adapter" in zone and zone["adapter"]:
                     device_serial = zone["adapter"]["deviceSerial"]
+                    device_serials.append(device_serial)
 
-                    # Get device details and profile in parallel
-                    device_detail_task = self.api.get_device_details(device_serial)
-                    device_profile_task = self.api.get_device_profile(device_serial)
+                    # Create tasks for parallel execution
+                    tasks.append(self.api.get_device_details(device_serial))
+                    tasks.append(self.api.get_device_profile(device_serial))
 
-                    device_detail, device_profile = await asyncio.gather(
-                        device_detail_task, device_profile_task
-                    )
+            # Execute all API calls in parallel
+            if tasks:
+                results = await asyncio.gather(*tasks)
+
+                # Process results (alternating device_detail, device_profile)
+                for i, device_serial in enumerate(device_serials):
+                    device_detail = results[i * 2]
+                    device_profile = results[i * 2 + 1]
 
                     # Process pending commands for the device
                     self._process_pending_commands(device_serial, device_detail)
@@ -148,6 +160,9 @@ class KumoCloudDataUpdateCoordinator(DataUpdateCoordinator):
         self.cached_commands[(device_serial, command)] = (current_time, value)
         _LOGGER.debug("Cached command in device data: %s at %s", command, current_time)
 
+        # Optimization 3: Periodically clean up stale cached commands
+        self._cleanup_stale_cache()
+
     def cull_cached_commands(self, device_serial: str, date: str) -> None:
         """Remove cached commands for a device where the date is on or after the item's timestamp."""
         to_remove = []
@@ -161,29 +176,36 @@ class KumoCloudDataUpdateCoordinator(DataUpdateCoordinator):
             # Check if the device_serial matches and the input date is on or after the cached date
             if cached_device_serial == device_serial and input_date >= cached_date_obj:
                 to_remove.append(key)
-            else:
-                # Log details if the condition fails
-                _LOGGER.debug(
-                    "Skipping cached command: cached_device_serial=%s, device_serial=%s, "
-                    "input_date=%s, cached_date_obj=%s, date=%s, cached_date=%s",
-                    cached_device_serial,
-                    device_serial,
-                    input_date,
-                    cached_date_obj,
-                    date,
-                    cached_date,
-                )
 
         # Remove the matching keys
         for key in to_remove:
             del self.cached_commands[key]
 
-        # Log the culled and remaining commands
-        remaining_count = len(self.cached_commands)
-        _LOGGER.debug(
-            "Culled %d cached commands for device %s on or after %s. Remaining cached commands: %d",
-            len(to_remove), device_serial, date, remaining_count
-        )
+        # Optimization 5: Only log when commands are actually culled
+        if to_remove:
+            remaining_count = len(self.cached_commands)
+            _LOGGER.debug(
+                "Culled %d cached commands for device %s on or after %s. Remaining: %d",
+                len(to_remove), device_serial, date, remaining_count
+            )
+
+    def _cleanup_stale_cache(self) -> None:
+        """Remove cached commands older than max age to prevent memory leaks."""
+        now = datetime.now(timezone.utc)
+        to_remove = []
+
+        for key, value in self.cached_commands.items():
+            cached_date_str, _ = value
+            cached_date = datetime.fromisoformat(cached_date_str)
+
+            # Remove commands older than max age
+            if now - cached_date > self._cache_max_age:
+                to_remove.append(key)
+
+        if to_remove:
+            for key in to_remove:
+                del self.cached_commands[key]
+            _LOGGER.debug("Cleaned up %d stale cached commands (older than %s)", len(to_remove), self._cache_max_age)
 
 class KumoCloudDevice:
     """Representation of a Kumo Cloud device."""
