@@ -51,8 +51,16 @@ KUMO_TO_HVAC_MODE = {
     OPERATION_MODE_AUTO_HEAT: HVACMode.HEAT_COOL,
 }
 
-# Reverse mapping
-HVAC_TO_KUMO_MODE = {v: k for k, v in KUMO_TO_HVAC_MODE.items()}
+# Optimization 21: Explicit reverse mapping to avoid collision
+# (dict comprehension would lose auto_cool and auto_heat modes)
+HVAC_TO_KUMO_MODE = {
+    HVACMode.OFF: OPERATION_MODE_OFF,
+    HVACMode.COOL: OPERATION_MODE_COOL,
+    HVACMode.HEAT: OPERATION_MODE_HEAT,
+    HVACMode.DRY: OPERATION_MODE_DRY,
+    HVACMode.FAN_ONLY: OPERATION_MODE_VENT,
+    HVACMode.HEAT_COOL: OPERATION_MODE_AUTO,  # Prefer standard auto mode
+}
 
 
 async def async_setup_entry(
@@ -94,6 +102,15 @@ class KumoCloudClimate(CoordinatorEntity, ClimateEntity):
         # Set up supported features based on device profile
         self._setup_supported_features()
 
+    @property
+    def _profile(self) -> dict[str, Any]:
+        """Get normalized profile data (Optimization 4)."""
+        profile = self.device.profile_data
+        if not profile:
+            return {}
+        # Normalize to dict if it's a list
+        return profile[0] if isinstance(profile, list) else profile
+
     def _setup_supported_features(self) -> None:
         """Set up supported features based on device capabilities."""
         features = (
@@ -102,10 +119,9 @@ class KumoCloudClimate(CoordinatorEntity, ClimateEntity):
             | ClimateEntityFeature.TURN_ON
         )
 
-        profile = self.device.profile_data
-        if profile:
-            profile_data = profile[0] if isinstance(profile, list) else profile
-
+        # Optimization 4: Use normalized profile property
+        profile_data = self._profile
+        if profile_data:
             # Check for fan speed support
             if profile_data.get("numberOfFanSpeeds", 0) > 0:
                 features |= ClimateEntityFeature.FAN_MODE
@@ -121,19 +137,16 @@ class KumoCloudClimate(CoordinatorEntity, ClimateEntity):
 
     def _handle_coordinator_update(self) -> None:
         """Handle updated data from the coordinator."""
-        # When we get fresh data from the cloud, clear optimistic values that match
+        # Optimization 2: Clear optimistic values that match cloud state in one pass
         device_data = self.device.device_data
         adapter = self.device.zone_data.get("adapter", {})
 
-        # Clear optimistic values if cloud state matches what we commanded
-        keys_to_remove = []
-        for key in list(self._optimistic_state.keys()):
-            cloud_value = device_data.get(key, adapter.get(key))
-            if cloud_value == self._optimistic_state[key]:
-                keys_to_remove.append(key)
-
-        for key in keys_to_remove:
-            del self._optimistic_state[key]
+        # Rebuild optimistic state dict with only unmatched values
+        self._optimistic_state = {
+            key: value
+            for key, value in self._optimistic_state.items()
+            if device_data.get(key, adapter.get(key)) != value
+        }
 
         super()._handle_coordinator_update()
 
@@ -150,20 +163,8 @@ class KumoCloudClimate(CoordinatorEntity, ClimateEntity):
 
     @property
     def device_info(self) -> DeviceInfo:
-        """Return device information."""
-        zone_data = self.device.zone_data
-        device_data = self.device.device_data
-
-        model = device_data.get("model", {}).get("materialDescription", "Unknown Model")
-
-        return DeviceInfo(
-            identifiers={(DOMAIN, self.device.device_serial)},
-            name=zone_data.get("name", "Kumo Cloud Device"),
-            manufacturer="Mitsubishi Electric",
-            model=model,
-            sw_version=device_data.get("model", {}).get("serialProfile"),
-            serial_number=device_data.get("serialNumber"),
-        )
+        """Return device information (Optimization 12: delegated to device)."""
+        return self.device.device_info
 
     @property
     def current_temperature(self) -> float | None:
@@ -209,10 +210,9 @@ class KumoCloudClimate(CoordinatorEntity, ClimateEntity):
         """Return the list of available HVAC modes."""
         modes = [HVACMode.OFF]
 
-        profile = self.device.profile_data
-        if profile:
-            profile_data = profile[0] if isinstance(profile, list) else profile
-
+        # Optimization 4: Use normalized profile property
+        profile_data = self._profile
+        if profile_data:
             # Add modes based on device capabilities
             if profile_data.get("hasModeHeat", False):
                 modes.append(HVACMode.HEAT)
@@ -294,11 +294,11 @@ class KumoCloudClimate(CoordinatorEntity, ClimateEntity):
     @property
     def fan_modes(self) -> list[str] | None:
         """Return the list of available fan modes based on device capabilities."""
-        profile = self.device.profile_data
-        if not profile:
+        # Optimization 4: Use normalized profile property
+        profile_data = self._profile
+        if not profile_data:
             return None
 
-        profile_data = profile[0] if isinstance(profile, list) else profile
         num_fan_speeds = profile_data.get("numberOfFanSpeeds", 0)
 
         if num_fan_speeds == 0:
@@ -329,11 +329,10 @@ class KumoCloudClimate(CoordinatorEntity, ClimateEntity):
     @property
     def swing_modes(self) -> list[str] | None:
         """Return the list of available swing modes."""
-        profile = self.device.profile_data
-        if not profile:
+        # Optimization 4: Use normalized profile property
+        profile_data = self._profile
+        if not profile_data:
             return None
-
-        profile_data = profile[0] if isinstance(profile, list) else profile
 
         # If device supports vane control, return all positions
         if profile_data.get("hasVaneDir", False) or profile_data.get("hasVaneSwing", False):
@@ -344,9 +343,9 @@ class KumoCloudClimate(CoordinatorEntity, ClimateEntity):
     @property
     def min_temp(self) -> float:
         """Return minimum temperature."""
-        profile = self.device.profile_data
-        if profile:
-            profile_data = profile[0] if isinstance(profile, list) else profile
+        # Optimization 4: Use normalized profile property
+        profile_data = self._profile
+        if profile_data:
             min_setpoints = profile_data.get("minimumSetPoints", {})
             # Return the minimum of heat and cool setpoints
             return min(min_setpoints.get("heat", 16), min_setpoints.get("cool", 16))
@@ -355,9 +354,9 @@ class KumoCloudClimate(CoordinatorEntity, ClimateEntity):
     @property
     def max_temp(self) -> float:
         """Return maximum temperature."""
-        profile = self.device.profile_data
-        if profile:
-            profile_data = profile[0] if isinstance(profile, list) else profile
+        # Optimization 4: Use normalized profile property
+        profile_data = self._profile
+        if profile_data:
             max_setpoints = profile_data.get("maximumSetPoints", {})
             # Return the maximum of heat and cool setpoints
             return max(max_setpoints.get("heat", 30), max_setpoints.get("cool", 30))

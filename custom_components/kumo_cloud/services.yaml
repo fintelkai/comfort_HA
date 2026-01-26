@@ -1,0 +1,26 @@
+# Optimization 31: Custom services for advanced features
+refresh_device:
+  name: Refresh device
+  description: Force immediate refresh of a specific device's status
+  fields:
+    entity_id:
+      description: Entity ID of the device to refresh
+      example: "climate.bedroom_ac"
+      required: true
+      selector:
+        entity:
+          domain: climate
+          integration: kumo_cloud
+
+clear_cache:
+  name: Clear command cache
+  description: Clear cached commands for a device (useful for debugging)
+  fields:
+    entity_id:
+      description: Entity ID of the device (leave empty to clear all)
+      example: "climate.bedroom_ac"
+      required: false
+      selector:
+        entity:
+          domain: climate
+          integration: kumo_cloud

@@ -7,12 +7,13 @@ from typing import Any
 
 import voluptuous as vol
 
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
+from homeassistant.config_entries import ConfigFlow, ConfigFlowResult, OptionsFlow
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.data_entry_flow import FlowResult
 
 from .api import KumoCloudAPI, KumoCloudAuthError, KumoCloudConnectionError
-from .const import CONF_SITE_ID, DOMAIN
+from .const import CONF_SITE_ID, DOMAIN, DEFAULT_SCAN_INTERVAL, COMMAND_SETTLE_TIME
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -61,6 +62,12 @@ class KumoCloudConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Kumo Cloud."""
 
     VERSION = 1
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry) -> OptionsFlow:
+        """Get the options flow for this handler (Optimization 22)."""
+        return KumoCloudOptionsFlow(config_entry)
 
     def __init__(self) -> None:
         """Initialize the config flow."""
@@ -129,21 +136,28 @@ class KumoCloudConfigFlow(ConfigFlow, domain=DOMAIN):
 
     async def _create_entry(self) -> ConfigFlowResult:
         """Create the config entry."""
-        # Find the selected site
+        # Optimization 14: Find the selected site with default to prevent StopIteration
         selected_site = next(
-            site for site in self.data["sites"] if site["id"] == self.data[CONF_SITE_ID]
+            (site for site in self.data["sites"] if site["id"] == self.data[CONF_SITE_ID]),
+            None
         )
+
+        if selected_site is None:
+            _LOGGER.error("Site %s not found in available sites", self.data[CONF_SITE_ID])
+            raise ValueError(f"Site {self.data[CONF_SITE_ID]} not found")
 
         # Use username and site ID as unique ID to allow multiple sites per account
         unique_id = f"{self.data[CONF_USERNAME]}_{self.data[CONF_SITE_ID]}"
         await self.async_set_unique_id(unique_id)
         self._abort_if_unique_id_configured()
 
+        # Optimization 20: Don't store password (security best practice)
+        # Only tokens needed for ongoing auth; password only for initial login/reauth
         return self.async_create_entry(
             title=f"Kumo Cloud - {selected_site['name']}",
             data={
                 CONF_USERNAME: self.data[CONF_USERNAME],
-                CONF_PASSWORD: self.data[CONF_PASSWORD],
+                # CONF_PASSWORD removed - not stored for security
                 CONF_SITE_ID: self.data[CONF_SITE_ID],
                 "access_token": self.api.access_token,
                 "refresh_token": self.api.refresh_token,
@@ -195,3 +209,34 @@ class KumoCloudConfigFlow(ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema({vol.Required(CONF_PASSWORD): str}),
             errors=errors,
         )
+
+
+
+class KumoCloudOptionsFlow(OptionsFlow):
+    """Handle options flow for Kumo Cloud (Optimization 22)."""
+
+    def __init__(self, config_entry) -> None:
+        """Initialize options flow."""
+        self.config_entry = config_entry
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Manage the options."""
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
+
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema({
+                vol.Optional(
+                    "scan_interval",
+                    default=self.config_entry.options.get("scan_interval", DEFAULT_SCAN_INTERVAL)
+                ): vol.All(vol.Coerce(int), vol.Range(min=30, max=300)),
+                vol.Optional(
+                    "command_settle_time",
+                    default=self.config_entry.options.get("command_settle_time", COMMAND_SETTLE_TIME)
+                ): vol.All(vol.Coerce(float), vol.Range(min=0.5, max=5.0)),
+            }),
+        )
+

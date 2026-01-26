@@ -97,3 +97,7 @@ UI_VANE_POSITIONS = ["Auto", "Swing", "1 - Lowest", "2 - Low", "3 - Middle", "4 
 
 # Default scan interval in seconds
 DEFAULT_SCAN_INTERVAL = 60
+
+# Command settle time: wait period after sending command before refreshing device state
+# Optimization 17: Configurable settle time (default 1 second)
+COMMAND_SETTLE_TIME = 1.0  # seconds
