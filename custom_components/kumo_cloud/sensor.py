@@ -7,7 +7,7 @@ from typing import Any
 
 from homeassistant.components.sensor import SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import ATTR_TEMPERATURE, UnitOfTemperature
+from homeassistant.const import UnitOfTemperature  # Optimization 18: Removed unused ATTR_TEMPERATURE
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
@@ -61,21 +61,14 @@ class KumoCloudTemperatureSensor(CoordinatorEntity, SensorEntity):
         return adapter.get("roomTemp")
 
     @property
+    def available(self) -> bool:
+        """Return True if entity is available (Optimization 11)."""
+        return self.device.available and self.coordinator.last_update_success
+
+    @property
     def device_info(self) -> DeviceInfo:
-        """Return device information."""
-        zone_data = self.device.zone_data
-        device_data = self.device.device_data
-
-        model = device_data.get("model", {}).get("materialDescription", "Unknown Model")
-
-        return DeviceInfo(
-            identifiers={(DOMAIN, self.device.device_serial)},
-            name=zone_data.get("name", "Kumo Cloud Device"),
-            manufacturer="Mitsubishi Electric",
-            model=model,
-            sw_version=device_data.get("model", {}).get("serialProfile"),
-            serial_number=device_data.get("serialNumber"),
-        )
+        """Return device information (Optimization 12: delegated to device)."""
+        return self.device.device_info
 
 
 class KumoCloudHumiditySensor(CoordinatorEntity, SensorEntity):
@@ -101,18 +94,11 @@ class KumoCloudHumiditySensor(CoordinatorEntity, SensorEntity):
         return device_data.get("humidity", adapter.get("humidity"))
 
     @property
+    def available(self) -> bool:
+        """Return True if entity is available (Optimization 11)."""
+        return self.device.available and self.coordinator.last_update_success
+
+    @property
     def device_info(self) -> DeviceInfo:
-        """Return device information."""
-        zone_data = self.device.zone_data
-        device_data = self.device.device_data
-
-        model = device_data.get("model", {}).get("materialDescription", "Unknown Model")
-
-        return DeviceInfo(
-            identifiers={(DOMAIN, self.device.device_serial)},
-            name=zone_data.get("name", "Kumo Cloud Device"),
-            manufacturer="Mitsubishi Electric",
-            model=model,
-            sw_version=device_data.get("model", {}).get("serialProfile"),
-            serial_number=device_data.get("serialNumber"),
-        )
+        """Return device information (Optimization 12: delegated to device)."""
+        return self.device.device_info

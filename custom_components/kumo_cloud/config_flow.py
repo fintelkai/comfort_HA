@@ -129,10 +129,15 @@ class KumoCloudConfigFlow(ConfigFlow, domain=DOMAIN):
 
     async def _create_entry(self) -> ConfigFlowResult:
         """Create the config entry."""
-        # Find the selected site
+        # Optimization 14: Find the selected site with default to prevent StopIteration
         selected_site = next(
-            site for site in self.data["sites"] if site["id"] == self.data[CONF_SITE_ID]
+            (site for site in self.data["sites"] if site["id"] == self.data[CONF_SITE_ID]),
+            None
         )
+
+        if selected_site is None:
+            _LOGGER.error("Site %s not found in available sites", self.data[CONF_SITE_ID])
+            raise ValueError(f"Site {self.data[CONF_SITE_ID]} not found")
 
         # Use username and site ID as unique ID to allow multiple sites per account
         unique_id = f"{self.data[CONF_USERNAME]}_{self.data[CONF_SITE_ID]}"

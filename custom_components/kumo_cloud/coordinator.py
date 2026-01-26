@@ -7,7 +7,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.core import HomeAssistant
 
 from .api import KumoCloudAPI, KumoCloudAuthError, KumoCloudConnectionError
-from .const import DOMAIN, DEFAULT_SCAN_INTERVAL
+from .const import DOMAIN, DEFAULT_SCAN_INTERVAL, COMMAND_SETTLE_TIME
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -27,6 +27,8 @@ class KumoCloudDataUpdateCoordinator(DataUpdateCoordinator):
         self.zones: list[dict[str, Any]] = []
         self.devices: dict[str, dict[str, Any]] = {}
         self.device_profiles: dict[str, list[dict[str, Any]]] = {}
+        # Optimization 10: Zone index for O(1) lookups instead of O(n) linear search
+        self.zone_index: dict[str, dict[str, Any]] = {}
 
         # Instance variable to store cached commands
         # Optimization 3: Add max age to prevent memory leaks
@@ -44,8 +46,12 @@ class KumoCloudDataUpdateCoordinator(DataUpdateCoordinator):
             if cached_device_serial == device_serial:
                 device_detail[command] = command_value
 
-    async def _async_update_data(self) -> dict[str, Any]:
-        """Fetch data from Kumo Cloud."""
+    async def _async_update_data(self, _retry_attempted: bool = False) -> dict[str, Any]:
+        """Fetch data from Kumo Cloud.
+
+        Args:
+            _retry_attempted: Internal flag to prevent infinite recursion on token refresh
+        """
         try:
             # Get zones for the site
             zones = await self.api.get_zones(self.site_id)
@@ -86,6 +92,8 @@ class KumoCloudDataUpdateCoordinator(DataUpdateCoordinator):
             self.zones = zones
             self.devices = devices
             self.device_profiles = device_profiles
+            # Optimization 10: Build zone index for O(1) lookups
+            self.zone_index = {zone["id"]: zone for zone in zones}
 
             return {
                 "zones": zones,
@@ -94,15 +102,22 @@ class KumoCloudDataUpdateCoordinator(DataUpdateCoordinator):
             }
 
         except KumoCloudAuthError as err:
-            # Try to refresh token once
-            try:
-                await self.api.refresh_access_token()
-                # Retry the request
-                return await self._async_update_data()
-            except KumoCloudAuthError as refresh_err:
+            # Optimization 9: Try to refresh token once, prevent infinite recursion
+            if not _retry_attempted:
+                try:
+                    _LOGGER.debug("Authentication failed, attempting token refresh")
+                    await self.api.refresh_access_token()
+                    # Retry the request with flag set to prevent further retries
+                    return await self._async_update_data(_retry_attempted=True)
+                except KumoCloudAuthError as refresh_err:
+                    raise UpdateFailed(
+                        f"Authentication failed after token refresh: {refresh_err}"
+                    ) from refresh_err
+            else:
+                # Already retried once, don't retry again to prevent infinite recursion
                 raise UpdateFailed(
-                    f"Authentication failed: {refresh_err}"
-                ) from refresh_err
+                    f"Authentication failed on retry: {err}"
+                ) from err
         except KumoCloudConnectionError as err:
             raise UpdateFailed(f"Error communicating with API: {err}") from err
         except Exception as err:
@@ -137,6 +152,8 @@ class KumoCloudDataUpdateCoordinator(DataUpdateCoordinator):
                                 "humidity": device_detail.get("humidity"),
                             }
                         )
+                        # Optimization 10: Update zone index as well
+                        self.zone_index[zone["id"]] = zone
                         break
 
             # Update the coordinator's data dict
@@ -220,18 +237,13 @@ class KumoCloudDevice:
         self.coordinator = coordinator
         self.zone_id = zone_id
         self.device_serial = device_serial
-        self._zone_data: dict[str, Any] | None = None
-        self._device_data: dict[str, Any] | None = None
-        self._profile_data: list[dict[str, Any]] | None = None
+        # Optimization 13: Removed unused instance variables (_zone_data, _device_data, _profile_data)
 
     @property
     def zone_data(self) -> dict[str, Any]:
-        """Get the zone data."""
-        # Always get fresh data from coordinator
-        for zone in self.coordinator.zones:
-            if zone["id"] == self.zone_id:
-                return zone
-        return {}
+        """Get the zone data with O(1) lookup (Optimization 10)."""
+        # Use zone index for constant-time lookup instead of O(n) linear search
+        return self.coordinator.zone_index.get(self.zone_id, {})
 
     @property
     def device_data(self) -> dict[str, Any]:
@@ -267,6 +279,28 @@ class KumoCloudDevice:
         """Return a unique ID for the device."""
         return f"{self.device_serial}_{self.zone_id}"
 
+    @property
+    def device_info(self):
+        """Return device information shared across all entities (Optimization 12).
+
+        This consolidates duplicate device_info implementations from climate and sensor entities.
+        """
+        from homeassistant.helpers.device_registry import DeviceInfo
+        from .const import DOMAIN
+
+        zone_data = self.zone_data
+        device_data = self.device_data
+        model = device_data.get("model", {}).get("materialDescription", "Unknown Model")
+
+        return DeviceInfo(
+            identifiers={(DOMAIN, self.device_serial)},
+            name=zone_data.get("name", "Kumo Cloud Device"),
+            manufacturer="Mitsubishi Electric",
+            model=model,
+            sw_version=device_data.get("model", {}).get("serialProfile"),
+            serial_number=device_data.get("serialNumber"),
+        )
+
     async def send_command(self, commands: dict[str, Any]) -> None:
         """Send a command to the device and refresh status."""
         try:
@@ -276,8 +310,8 @@ class KumoCloudDevice:
             # Cache the commands in the coordinator immediately
             self.cache_commands(commands)
 
-            # Wait a moment for the command to be processed
-            await asyncio.sleep(1)
+            # Optimization 17: Wait for command to be processed (configurable)
+            await asyncio.sleep(COMMAND_SETTLE_TIME)
 
             # Refresh this specific device's data immediately
             await self.coordinator.async_refresh_device(self.device_serial)
