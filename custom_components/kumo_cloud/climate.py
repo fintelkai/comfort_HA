@@ -51,8 +51,16 @@ KUMO_TO_HVAC_MODE = {
     OPERATION_MODE_AUTO_HEAT: HVACMode.HEAT_COOL,
 }
 
-# Reverse mapping
-HVAC_TO_KUMO_MODE = {v: k for k, v in KUMO_TO_HVAC_MODE.items()}
+# Optimization 21: Explicit reverse mapping to avoid collision
+# (dict comprehension would lose auto_cool and auto_heat modes)
+HVAC_TO_KUMO_MODE = {
+    HVACMode.OFF: OPERATION_MODE_OFF,
+    HVACMode.COOL: OPERATION_MODE_COOL,
+    HVACMode.HEAT: OPERATION_MODE_HEAT,
+    HVACMode.DRY: OPERATION_MODE_DRY,
+    HVACMode.FAN_ONLY: OPERATION_MODE_VENT,
+    HVACMode.HEAT_COOL: OPERATION_MODE_AUTO,  # Prefer standard auto mode
+}
 
 
 async def async_setup_entry(

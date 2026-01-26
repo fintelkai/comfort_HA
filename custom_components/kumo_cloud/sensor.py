@@ -5,11 +5,12 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from homeassistant.components.sensor import SensorEntity, SensorStateClass
+from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfTemperature  # Optimization 18: Removed unused ATTR_TEMPERATURE
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -44,6 +45,8 @@ class KumoCloudTemperatureSensor(CoordinatorEntity, SensorEntity):
 
     _attr_has_entity_name = True
     _attr_name = "Temperature"
+    _attr_icon = "mdi:thermometer"  # Optimization 26
+    _attr_entity_category = EntityCategory.DIAGNOSTIC  # Optimization 25
 
     def __init__(self, device: KumoCloudDevice) -> None:
         """Initialize the temperature sensor."""
@@ -51,7 +54,7 @@ class KumoCloudTemperatureSensor(CoordinatorEntity, SensorEntity):
         self.device = device
         self._attr_unique_id = f"{device.device_serial}_temperature"
         self._attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
-        self._attr_device_class = "temperature"
+        self._attr_device_class = SensorDeviceClass.TEMPERATURE  # Optimization 19: Use enum
         self._attr_state_class = SensorStateClass.MEASUREMENT
 
     @property
@@ -76,6 +79,8 @@ class KumoCloudHumiditySensor(CoordinatorEntity, SensorEntity):
 
     _attr_has_entity_name = True
     _attr_name = "Humidity"
+    _attr_icon = "mdi:water-percent"  # Optimization 26
+    _attr_entity_category = EntityCategory.DIAGNOSTIC  # Optimization 25
 
     def __init__(self, device: KumoCloudDevice) -> None:
         """Initialize the humidity sensor."""
@@ -83,7 +88,7 @@ class KumoCloudHumiditySensor(CoordinatorEntity, SensorEntity):
         self.device = device
         self._attr_unique_id = f"{device.device_serial}_humidity"
         self._attr_native_unit_of_measurement = "%"
-        self._attr_device_class = "humidity"
+        self._attr_device_class = SensorDeviceClass.HUMIDITY  # Optimization 19: Use enum
         self._attr_state_class = SensorStateClass.MEASUREMENT
 
     @property

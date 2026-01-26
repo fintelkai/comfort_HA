@@ -14,13 +14,13 @@ _LOGGER = logging.getLogger(__name__)
 class KumoCloudDataUpdateCoordinator(DataUpdateCoordinator):
     """Class to manage fetching Kumo Cloud data."""
 
-    def __init__(self, hass: HomeAssistant, api: KumoCloudAPI, site_id: str) -> None:
-        """Initialize the coordinator."""
+    def __init__(self, hass: HomeAssistant, api: KumoCloudAPI, site_id: str, scan_interval: int = DEFAULT_SCAN_INTERVAL) -> None:
+        """Initialize the coordinator (Optimization 22: configurable scan_interval)."""
         super().__init__(
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=timedelta(seconds=DEFAULT_SCAN_INTERVAL),
+            update_interval=timedelta(seconds=scan_interval),
         )
         self.api = api
         self.site_id = site_id
@@ -280,7 +280,7 @@ class KumoCloudDevice:
         return f"{self.device_serial}_{self.zone_id}"
 
     @property
-    def device_info(self):
+    def device_info(self) -> "DeviceInfo":  # Optimization 27: Add type hint
         """Return device information shared across all entities (Optimization 12).
 
         This consolidates duplicate device_info implementations from climate and sensor entities.
@@ -330,3 +330,8 @@ class KumoCloudDevice:
         """Cache multiple commands with their values and timestamps in the coordinator."""
         for command, value in commands.items():
             self.cache_command(command, value)
+
+    def async_shutdown(self) -> None:
+        """Shutdown coordinator and clean up resources (Optimization 34)."""
+        self.cached_commands.clear()
+        _LOGGER.debug("Coordinator shutdown complete - cleared cached commands")
