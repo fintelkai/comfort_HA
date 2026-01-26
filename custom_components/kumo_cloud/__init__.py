@@ -13,7 +13,7 @@ import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
 
 from .api import KumoCloudAPI, KumoCloudAuthError, KumoCloudConnectionError
-from .const import CONF_SITE_ID, DOMAIN
+from .const import CONF_SITE_ID, DOMAIN, DEFAULT_SCAN_INTERVAL
 from .coordinator import KumoCloudDataUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
