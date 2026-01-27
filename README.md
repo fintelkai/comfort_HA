@@ -1,7 +1,7 @@
 # Mitsubishi Comfort Integration for Home Assistant
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
-[![GitHub release](https://img.shields.io/github/release/jjustinwilson/kumo_cloud.svg)](https://github.com/jjustinwilson/kumo_cloud/releases)
+[![GitHub release](https://img.shields.io/github/release/xFlawless11x/comfort_HA.svg)](https://github.com/xFlawless11x/comfort_HA/releases)
 
 This integration allows you to control your Mitsubishi Electric climate control systems through the Kumo Cloud API in Home Assistant.
 
@@ -12,7 +12,7 @@ This integration allows you to control your Mitsubishi Electric climate control 
 1. Install [HACS](https://hacs.xyz/) if you haven't already
 2. Go to HACS → Integrations
 3. Click the three dots in the top right corner and select "Custom repositories"
-4. Add this repository URL: `https://github.com/jjustinwilson/comfort_HA/`
+4. Add this repository URL: `https://github.com/xFlawless11x/comfort_HA/`
 5. Select "Integration" as the category
 6. Click "Add"
 7. Find "Mitsubishi Comfort" in the HACS integrations list and install it
@@ -72,7 +72,7 @@ This integration uses the unofficial Kumo Cloud API v3. The API endpoints and sc
 
 ## Support
 
-If you encounter any issues, please check the [issue tracker](https://github.com/jjustinwilson/comfort_HA/issues) or create a new issue with details about your problem.
+If you encounter any issues, please check the [issue tracker](https://github.com/xFlawless11x/comfort_HA/issues) or create a new issue with details about your problem.
 
 ## Contributing
 
