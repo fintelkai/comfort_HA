@@ -43,5 +43,5 @@ async def async_get_config_entry_diagnostics(
         },
         "zones": async_redact_data(coordinator.zones, TO_REDACT),
         "devices": async_redact_data(coordinator.devices, TO_REDACT),
-        "device_profiles": coordinator.device_profiles,
+        "device_profiles": async_redact_data(coordinator.device_profiles, TO_REDACT),
     }

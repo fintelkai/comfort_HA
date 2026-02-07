@@ -63,6 +63,25 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     except KumoCloudConnectionError as err:
         raise ConfigEntryNotReady(f"Unable to connect: {err}") from err
 
+    # Remove any legacy password storage and persist fresh tokens after login.
+    updated_data = dict(entry.data)
+    needs_entry_update = False
+
+    if CONF_PASSWORD in updated_data:
+        updated_data.pop(CONF_PASSWORD, None)
+        needs_entry_update = True
+
+    if api.access_token and updated_data.get("access_token") != api.access_token:
+        updated_data["access_token"] = api.access_token
+        needs_entry_update = True
+
+    if api.refresh_token and updated_data.get("refresh_token") != api.refresh_token:
+        updated_data["refresh_token"] = api.refresh_token
+        needs_entry_update = True
+
+    if needs_entry_update:
+        hass.config_entries.async_update_entry(entry, data=updated_data)
+
     # Create the coordinator (Optimization 22: Use options for scan_interval)
     scan_interval = entry.options.get("scan_interval", DEFAULT_SCAN_INTERVAL)
     coordinator = KumoCloudDataUpdateCoordinator(hass, api, entry.data[CONF_SITE_ID], scan_interval)
