@@ -129,7 +129,7 @@ class KumoCloudAPI:
         }
 
         try:
-            async with asyncio.timeout(20):
+            async with asyncio.timeout(30):
                 async with self.session.post(
                     url, headers=headers, json=data
                 ) as response:
@@ -169,7 +169,7 @@ class KumoCloudAPI:
         data = {"refresh": self.refresh_token}
 
         try:
-            async with asyncio.timeout(20):
+            async with asyncio.timeout(30):
                 async with self.session.post(
                     url, headers=headers, json=data
                 ) as response:
