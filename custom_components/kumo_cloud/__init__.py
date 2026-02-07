@@ -119,7 +119,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Optimization 34: Clean up coordinator resources
         coordinator = hass.data[DOMAIN].pop(entry.entry_id)
         if hasattr(coordinator, "async_shutdown"):
-            coordinator.async_shutdown()
+            await coordinator.async_shutdown()
 
     return unload_ok
 
