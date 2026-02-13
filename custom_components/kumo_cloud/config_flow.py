@@ -67,7 +67,7 @@ class KumoCloudConfigFlow(ConfigFlow, domain=DOMAIN):
     @callback
     def async_get_options_flow(config_entry) -> OptionsFlow:
         """Get the options flow for this handler (Optimization 22)."""
-        return KumoCloudOptionsFlow(config_entry)
+        return KumoCloudOptionsFlow()
 
     def __init__(self) -> None:
         """Initialize the config flow."""
@@ -215,10 +215,6 @@ class KumoCloudConfigFlow(ConfigFlow, domain=DOMAIN):
 
 class KumoCloudOptionsFlow(OptionsFlow):
     """Handle options flow for Kumo Cloud (Optimization 22)."""
-
-    def __init__(self, config_entry) -> None:
-        """Initialize options flow."""
-        self.config_entry = config_entry
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
